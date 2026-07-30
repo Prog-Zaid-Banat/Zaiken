@@ -1,0 +1,88 @@
+{
+  "name": "zaiken-app",
+  "version": "1.0.0",
+  "description": "Zaiken — Playnite/Overwolf-style gaming companion (library, overlay, AI coach)",
+  "author": "Zaid Bilal Banat",
+  "license": "UNLICENSED",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir",
+    "test": "node test/smoke.test.js && node test/database.unit.test.js",
+    "lint": "node --check main.js && node --check src/main/database.js && node --check src/main/preload.js && node --check src/main/services/crash.js && node --check src/main/services/updater.js"
+  },
+  "build": {
+    "appId": "com.zaiken.coach",
+    "productName": "Zaiken",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "package.json",
+      "src/**/*",
+      "assets/**/*",
+      "LICENSE",
+      "scripts/**/*"
+    ],
+    "afterPack": "./scripts/afterPack.js",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "REPLACE_GITHUB_OWNER",
+        "repo": "zaiken"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Zaiken"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "assets/icons/icon.png",
+      "category": "Game"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "assets/icons/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    }
+  },
+  "devDependencies": {
+    "@electron/fuses": "1.8.0",
+    "electron": "30.5.1",
+    "electron-builder": "24.13.3"
+  },
+  "optionalDependencies": {
+    "@sentry/electron": "5.3.0",
+    "electron-updater": "6.3.9"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.2",
+    "drizzle-orm": "^0.45.2",
+    "keytar": "^7.9.0",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3"
+  }
+}

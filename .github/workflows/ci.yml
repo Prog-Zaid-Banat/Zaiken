@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+        continue-on-error: true
+      - name: Syntax / lint checks
+        run: npm run lint
+      - name: Unit & smoke tests
+        run: npm test
+
+  # Full electron build is heavy; run on tags or manual dispatch later.
+  # Code signing: set CSC_LINK / CSC_KEY_PASSWORD (Windows) or Apple certs in secrets.

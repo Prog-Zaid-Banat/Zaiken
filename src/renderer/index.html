@@ -1,0 +1,105 @@
+<!-- Copyright © 2026 [Zaid Bilal Banat]. All rights reserved. Zaiken Gaming System -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: file: blob:; script-src 'self'; connect-src 'self'; form-action 'self'"/>
+<title>Zaiken</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="styles/main.css"/>
+</head>
+<body>
+
+<div id="titlebar">
+  <div id="titlebar-drag">
+    <div id="app-logo">
+      <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
+        <polygon points="14,2 26,9 26,21 14,28 2,21 2,9" fill="none" stroke="#00FFB2" stroke-width="1.5"/>
+        <polygon points="14,7 21,11 21,21 14,25 7,21 7,11" fill="#00FFB2" opacity=".18"/>
+        <text x="14" y="19" text-anchor="middle" font-size="9" font-weight="700" fill="#00FFB2" font-family="sans-serif">ZN</text>
+      </svg>
+      <span class="logo-name">Zaiken</span>
+    </div>
+  </div>
+  <div id="titlebar-controls">
+    <button id="btn-min" title="Minimize">─</button>
+    <button id="btn-max" title="Maximize">□</button>
+    <button id="btn-cls" title="Close">✕</button>
+  </div>
+</div>
+
+<div id="app-layout">
+  <nav id="sidebar">
+    <div id="nav-list">
+      <button class="nav-btn active" data-page="launcher"><span class="nbi">▶</span><span class="nbl">Launcher</span></button>
+      <button class="nav-btn" data-page="overlay"><span class="nbi">▣</span><span class="nbl">Overlay</span></button>
+      <button class="nav-btn" data-page="ai"><span class="nbi">✦</span><span class="nbl">AI Analysis</span></button>
+      <button class="nav-btn" data-page="achievements"><span class="nbi">★</span><span class="nbl">Achievements</span></button>
+      <button class="nav-btn" data-page="settings"><span class="nbi">⚙</span><span class="nbl">Settings</span></button>
+    </div>
+    <div id="sidebar-footer">
+      <div id="profile-mini" data-page="profile" class="nav-btn">
+        <div id="profile-ava">P</div>
+        <div>
+          <div id="profile-uname">Player</div>
+          <div id="profile-rank-lbl">Bronze</div>
+        </div>
+      </div>
+      <div id="xp-row">
+        <div id="xp-track"><div id="xp-fill"></div></div>
+        <div id="xp-lbl">LVL 1</div>
+      </div>
+    </div>
+  </nav>
+  <main id="content">
+    <div id="page-launcher" class="page active"></div>
+    <div id="page-overlay" class="page"></div>
+    <div id="page-ai" class="page"></div>
+    <div id="page-achievements" class="page"></div>
+    <div id="page-settings" class="page"></div>
+    <div id="page-profile" class="page"></div>
+  </main>
+</div>
+
+<div id="toast-container"></div>
+<div id="modal-bg" hidden>
+  <div id="modal-box">
+    <div id="modal-title"></div>
+    <div id="modal-body"></div>
+    <div id="modal-feet"></div>
+  </div>
+</div>
+
+<!-- Auth overlay (shown until session exists) -->
+<div id="auth-screen" style="position:fixed;inset:0;background:#0A0C10;display:flex;align-items:center;justify-content:center;z-index:9999;">
+  <div style="width:360px;background:#111318;border:1px solid rgba(0,255,178,.25);border-radius:12px;padding:40px 32px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="font-size:28px;font-weight:700;color:#00FFB2;letter-spacing:4px;margin-bottom:8px">ZAIKEN</div>
+      <div id="auth-title" style="color:#fff;font-size:18px;font-weight:600">Login</div>
+    </div>
+    <div id="auth-error" style="display:none;color:#ff5c5c;font-size:13px;margin-bottom:12px;text-align:center;"></div>
+    <input id="auth-email" type="email" placeholder="Email" class="inp" style="width:100%;margin-bottom:12px;" autocomplete="username"/>
+    <input id="auth-password" type="password" placeholder="Password (min 6 chars)" class="inp" style="width:100%;margin-bottom:20px;" autocomplete="current-password"/>
+    <button id="btn-login" class="btn btn-primary" style="width:100%">Login</button>
+    <div style="text-align:center;margin-top:16px;font-size:13px;color:#8a93a6">
+      <span id="auth-toggle-text">Don't have an account?</span>
+      <a href="#" id="auth-toggle-link" style="color:#00FFB2;text-decoration:none;margin-left:4px;">Register</a>
+    </div>
+  </div>
+</div>
+
+<script src="components/toast.js"></script>
+<script src="components/modal.js"></script>
+<script src="pages/launcher.js"></script>
+<script src="pages/overlay-page.js"></script>
+<script src="pages/analysis.js"></script>
+<script src="pages/achievements.js"></script>
+<script src="pages/settings.js"></script>
+<script src="pages/profile.js"></script>
+<script src="app.js"></script>
+<script src="login.js"></script>
+</body>
+</html>

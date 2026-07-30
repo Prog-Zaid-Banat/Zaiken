@@ -1,0 +1,14 @@
+{
+  "name": "zaiken-ai-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zaiken AI Coach proxy — API keys stay on the server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

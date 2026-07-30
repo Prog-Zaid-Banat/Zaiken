@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: transparent;
+    font-family: 'Segoe UI', 'Courier New', monospace;
+    overflow: hidden;
+    user-select: none;
+  }
+  #hud {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(10, 12, 16, 0.88);
+    border: 1px solid rgba(0,255,178,0.35);
+    border-radius: 6px;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+  }
+  .seg {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 7px 14px;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    min-width: 56px;
+  }
+  .seg:last-child { border-right: none; }
+  .val {
+    font-size: 15px;
+    font-weight: 700;
+    color: #00FFB2;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .val.warn  { color: #FFD700; }
+  .val.danger{ color: #FF4F6D; }
+  .lbl {
+    font-size: 8px;
+    color: #5a6a7a;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-top: 3px;
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="seg"><span class="val" id="v-cpu">--</span><span class="lbl">CPU</span></div>
+  <div class="seg"><span class="val" id="v-ram">--</span><span class="lbl">RAM</span></div>
+  <div class="seg"><span class="val" id="v-gpu">--</span><span class="lbl">GPU</span></div>
+  <div class="seg"><span class="val" id="v-ping">--</span><span class="lbl">PING</span></div>
+  <div class="seg"><span class="val" id="v-kd">--</span><span class="lbl">K/D</span></div>
+  <div class="seg"><span class="val" id="v-wr">--</span><span class="lbl">WIN</span></div>
+</div>
+<script>
+  function cls(el, level) {
+    el.className = 'val' + (level === 'danger' ? ' danger' : level === 'warn' ? ' warn' : '');
+  }
+  function apply(data) {
+    if (!data) return;
+    var cpu = document.getElementById('v-cpu');
+    var ram = document.getElementById('v-ram');
+    var gpu = document.getElementById('v-gpu');
+    var ping = document.getElementById('v-ping');
+    var kd = document.getElementById('v-kd');
+    var wr = document.getElementById('v-wr');
+
+    if (typeof data.cpu === 'number') {
+      cpu.textContent = data.cpu + '%';
+      cls(cpu, data.cpu >= 90 ? 'danger' : data.cpu >= 75 ? 'warn' : '');
+    }
+    if (typeof data.ram === 'number') {
+      ram.textContent = data.ram + '%';
+      cls(ram, data.ram >= 90 ? 'danger' : data.ram >= 80 ? 'warn' : '');
+    }
+    if (data.gpu == null) {
+      gpu.textContent = 'N/A';
+      cls(gpu, '');
+    } else {
+      gpu.textContent = data.gpu + '%';
+      cls(gpu, data.gpu >= 95 ? 'danger' : data.gpu >= 85 ? 'warn' : '');
+    }
+    if (data.ping == null) {
+      ping.textContent = '—';
+      cls(ping, 'warn');
+    } else {
+      ping.textContent = data.ping + 'ms';
+      cls(ping, data.ping > 80 ? 'danger' : data.ping > 40 ? 'warn' : '');
+    }
+    if (data.kd != null) {
+      kd.textContent = Number(data.kd).toFixed(2);
+    }
+    if (data.winRate != null) {
+      wr.textContent = data.winRate + '%';
+    }
+  }
+
+  // Prefer preload bridge; fall back to direct ipc if exposed
+  try {
+    if (window.zaiken && zaiken.onOverlayUpdate) {
+      zaiken.onOverlayUpdate(apply);
+    }
+  } catch (e) {}
+
+  // Also poll occasionally if main feed misses first tick
+  setInterval(function () {
+    if (window.zaiken && zaiken.system && zaiken.system.getStats) {
+      zaiken.system.getStats().then(apply).catch(function(){});
+    }
+  }, 5000);
+</script>
+</body>
+</html>
