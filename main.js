@@ -17,13 +17,13 @@ const db = require('./src/main/database');
 const { initCrashReporting, reportError } = require('./src/main/services/crash');
 const { setupAutoUpdater } = require('./src/main/services/updater');
 const aicoach = require('./src/main/services/aicoach');
-
+const { initSecureLayer, stopSecureLayer, getSecurePreloadPath } = require('./src/main/secure-bootstrap');
 const isDev = process.argv.includes('--dev');
 const USER_DATA = app.getPath('userData');
 const DB_PATH = path.join(USER_DATA, 'zaiken_data');
 const COVERS_DIR = path.join(USER_DATA, 'covers');
 
-const PRELOAD_PATH = path.join(__dirname, 'src', 'main', 'preload.js');
+const PRELOAD_PATH = getSecurePreloadPath();
 const RENDERER_DIR = path.join(__dirname, 'src', 'renderer');
 
 let mainWindow = null;
@@ -52,7 +52,8 @@ if (!gotLock) {
 db.init(DB_PATH);
 fs.mkdirSync(COVERS_DIR, { recursive: true });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await initSecureLayer();
   initCrashReporting();
   createMainWindow();
   createTray();
@@ -64,6 +65,10 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
 });
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+  });
+
 
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err);
@@ -79,6 +84,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  stopSecureLayer();
   globalShortcut.unregisterAll();
   if (powerBlockerId !== null) {
     powerSaveBlocker.stop(powerBlockerId);

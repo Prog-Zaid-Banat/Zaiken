@@ -1,44 +1,44 @@
-# Zaiken Architecture (Phase 1)
+# Zaiken Architecture
 
-## Layers
+## Overview
 
-```
-Presentation  → Electron main / preload / renderer (UI only)
-Application   → Use cases (orchestration)
-Domain        → Entities, value objects, repository interfaces
-Infrastructure→ SQLite, secrets, AI providers, scanner, logger
-```
+Zaiken is designed as a modular AI gaming platform.
 
-### Rules
+## Main Layers
 
-1. **Renderer never contains business logic.**
-2. **Domain has zero imports from Electron, fs, or SQL.**
-3. **Application depends on Domain interfaces only.**
-4. **Infrastructure implements Domain interfaces.**
-5. **IPC handlers are thin adapters** → call application use cases.
+### Presentation Layer
+Electron UI
 
-## Data flow
+Responsibilities:
+- User interface
+- Dashboard
+- User interaction
 
-```
-UI → preload bridge → IPC handler → Application use case
-    → Repository interface → SQLite repository → DB
-```
 
-## Secrets
+### Application Layer
 
-API keys and passwords never touch JSON/settings tables.
-Stored via `SecretStore` (keytar → Windows Credential Manager / macOS Keychain / Linux Secret Service).
+Responsibilities:
+- Business logic
+- AI workflows
+- Player analysis
 
-## Database
 
-- SQLite (SQLCipher in production)
-- WAL mode
-- Foreign keys ON
-- Drizzle ORM
-- Automatic migrations
-- JSON legacy migrator (one-shot)
+### Infrastructure Layer
 
-## Future sync
+Responsibilities:
+- Database
+- APIs
+- External services
 
-`SyncPort` abstracts push/pull. Local SQLite remains source of truth offline.
-PostgreSQL can implement the same port later.
+
+## Data Flow
+
+User
+ ↓
+Electron UI
+ ↓
+Application Services
+ ↓
+AI Engine
+ ↓
+Analytics System
