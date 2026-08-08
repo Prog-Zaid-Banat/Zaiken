@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const db = require('../database');
+const db = require('../database.legacy');
 
 const STEAM_PATHS_WIN = [
   'C:\\Program Files (x86)\\Steam\\steamapps\\common',

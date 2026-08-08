@@ -1,18 +1,12 @@
 // Copyright © 2026 [Zaid Bilal Banat]. All rights reserved. Zaiken
-// Local game-aware coach (no external API). Public knowledge + player stats.
 'use strict';
 
 window.Processor = (function () {
 
-  /** Normalize names for matching */
   function norm(s) {
     return String(s || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, ' ').trim();
   }
 
-  /**
-   * Per-game knowledge: only legitimate guide-style tips (farms, builds, systems).
-   * No cheats, exploits that violate ToS, or account sharing.
-   */
   var GAME_KB = {
     warframe: {
       aliases: ['warframe', 'wf', 'ورفريم', 'وارفريم'],

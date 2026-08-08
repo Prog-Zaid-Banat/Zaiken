@@ -18,7 +18,8 @@ window.LauncherPage = (function(){
   }
 
   async function loadAndRender(){
-    games = await zaiken.games.getAll();
+    var res = await zaiken.games.getAll();
+games = (res && res.success && Array.isArray(res.data)) ? res.data : [];
     var inner = document.getElementById('launcher-inner');
     if(!inner) return;
     if(games.length === 0){
@@ -245,7 +246,7 @@ window.LauncherPage = (function(){
         {label:'Add Game',cls:'btn-primary',action:async function(){
           var name = document.getElementById('m-name').value.trim();
           if(!name){Toast.error('Name is required'); return;}
-          await zaiken.games.add({
+          var res = await zaiken.games.add({
             name:name,
             genre:document.getElementById('m-genre').value.trim()||'Unknown',
             emoji:document.getElementById('m-emoji').value.trim()||'🎮',
@@ -254,6 +255,10 @@ window.LauncherPage = (function(){
             riotId:document.getElementById('m-riotid').value.trim(),
             logPath:document.getElementById('m-log').value
           });
+          if(!res || !res.success){
+            Toast.error('Failed to add game: '+((res&&res.error)||'Unknown error'));
+            return;
+          }
           Toast.success('Game added!');
           loadAndRender();
         }}
@@ -303,7 +308,7 @@ window.LauncherPage = (function(){
           var res = document.getElementById('e-result').value;
           var kills = parseInt(document.getElementById('e-kills').value)||0;
           var deaths = parseInt(document.getElementById('e-deaths').value)||0;
-          await zaiken.games.update(g.id,{
+          var updRes = await zaiken.games.update(g.id,{
             name:document.getElementById('e-name').value.trim()||g.name,
             genre:document.getElementById('e-genre').value.trim(),
             emoji:document.getElementById('e-emoji').value.trim()||g.emoji,
@@ -315,6 +320,10 @@ window.LauncherPage = (function(){
             losses:(g.losses||0)+(res==='loss'?1:0),
             matches:(g.matches||0)+(kills>0||deaths>0||res!=='draw'?1:0)
           });
+          if(!updRes || !updRes.success){
+            Toast.error('Failed to save game: '+((updRes&&updRes.error)||'Unknown error'));
+            return;
+          }
           if(kills>0||deaths>0||res!=='draw'){
             var matchRes = await zaiken.profile.recordMatch({kills:kills,deaths:deaths,wins:res==='win'?1:0,losses:res==='loss'?1:0,matches:1});
             if(matchRes && matchRes.unlocked && matchRes.unlocked.length){

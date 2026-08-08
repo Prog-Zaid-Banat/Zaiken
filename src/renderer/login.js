@@ -55,9 +55,9 @@ window.addEventListener('DOMContentLoaded', function () {
 
     try {
       if (mode === 'register') {
-        await zaiken.auth.register(email, password);
+        await window.zaiken.auth.register(email, password);
       } else {
-        await zaiken.auth.login(email, password);
+        await window.zaiken.auth.login(email, password);
       }
       enterApp();
     } catch (e) {
@@ -81,7 +81,7 @@ window.addEventListener('DOMContentLoaded', function () {
   });
 
   // If a session already exists from a previous run, skip straight to the app.
-  zaiken.auth.getCurrentUser().then(function (user) {
+  window.zaiken.auth.getCurrentUser().then(function (user) {
     if (user) {
       enterApp();
     } else {

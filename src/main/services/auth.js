@@ -1,13 +1,9 @@
 // Copyright © 2026 [Zaid Bilal Banat]. All rights reserved. Zaiken
 'use strict';
 
-// Local authentication — no external service (Firebase removed).
-// Passwords are never stored in plain text: they're hashed with scrypt
-// (per-user random salt) and only the hash + salt are persisted locally
-// via database.js (in the app's userData folder on the user's own machine).
 
 const crypto = require('crypto');
-const db = require('../database');
+const db = require('../database.legacy');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;

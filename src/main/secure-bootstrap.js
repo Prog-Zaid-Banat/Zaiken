@@ -1,27 +1,10 @@
-/**
- * Zaiken Secure Bootstrap – سطر واحد فقط في main.js
- *
- * الاستخدام في main.js:
- *
- *   const { initSecureLayer, getSecurePreloadPath } = require('./src/main/secure-bootstrap');
- *
- *   // عند إنشاء أي BrowserWindow:
- *   webPreferences: {
- *     preload: getSecurePreloadPath(),
- *     contextIsolation: true,
- *     nodeIntegration: false,
- *     sandbox: true,
- *   }
- *
- *   // داخل app.whenReady() بعد database.init:
- *   await initSecureLayer();
- */
+
 'use strict';
 
 const path = require('path');
 const fs = require('fs');
 
-const { setupSecureIpc, broadcastMetrics, setDaemon } = require('./ipc-bridge');
+const { setupSecureIpc, broadcastMetrics, setDaemon } = require('./ipc/ipc-bridge');
 const { NativeDaemonClient } = require('./native-daemon-client');
 
 let _daemon = null;

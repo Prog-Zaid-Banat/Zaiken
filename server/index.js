@@ -1,15 +1,8 @@
 // Copyright © 2026 [Zaid Bilal Banat]. All rights reserved. Zaiken
 'use strict';
 
-/**
- * Zaiken AI Coach proxy
- * - API keys live ONLY here
- * - Desktop app authenticates with ZAIKEN_APP_SECRET
- * - Endpoints: health, coach chat, daily report
- */
-
 const http = require('http');
-const https = require('https');
+const https = https = require('https');
 const { URL } = require('url');
 const fs = require('fs');
 const path = require('path');
@@ -32,8 +25,11 @@ const crypto = require('crypto');
   }
 })();
 
+const jwt = require('jsonwebtoken');
+
 const PORT = Number(process.env.PORT || 8787);
-const APP_SECRET = (process.env.ZAIKEN_APP_SECRET || '').trim();
+const ZAIKEN_JWT_SECRET = (process.env.ZAIKEN_JWT_SECRET || '').trim();
+
 const AI_PROVIDER = (process.env.AI_PROVIDER || 'groq').toLowerCase();
 const AI_API_KEY = (process.env.AI_API_KEY || process.env.GROQ_API_KEY || '').trim();
 const AI_MODEL = (process.env.AI_MODEL || '').trim();
@@ -43,35 +39,12 @@ const LIMIT_MIN = Number(process.env.RATE_LIMIT_PER_MIN || 20);
 const LIMIT_DAY = Number(process.env.RATE_LIMIT_PER_DAY || 300);
 
 if (!AI_API_KEY) {
-  console.error('[fatal] AI_API_KEY missing. Copy .env.example → .env');
+  console.error('[fatal] AI_API_KEY missing. Copy .env.example -> .env');
   process.exit(1);
 }
-if (!APP_SECRET || APP_SECRET === 'change-me-to-a-long-random-string') {
-  console.warn('[warn] Set a strong ZAIKEN_APP_SECRET before public deploy');
-}
-
-// ---- rate limit (memory) ----
-const buckets = new Map(); // key -> { min: {t,n}, day: {t,n} }
-
-function rateKey(req, body) {
-  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
-  return ip;
-}
-
-function allow(key) {
-  const now = Date.now();
-  let b = buckets.get(key);
-  if (!b) {
-    b = { min: { t: now, n: 0 }, day: { t: now, n: 0 } };
-    buckets.set(key, b);
-  }
-  if (now - b.min.t > 60000) { b.min = { t: now, n: 0 }; }
-  if (now - b.day.t > 86400000) { b.day = { t: now, n: 0 }; }
-  if (b.min.n >= LIMIT_MIN) return { ok: false, error: 'Rate limit: too many requests per minute' };
-  if (b.day.n >= LIMIT_DAY) return { ok: false, error: 'Rate limit: daily quota exceeded' };
-  b.min.n += 1;
-  b.day.n += 1;
-  return { ok: true };
+if (!ZAIKEN_JWT_SECRET) {
+  console.error('[fatal] ZAIKEN_JWT_SECRET is missing. Generate a dedicated random secret for Zaiken tokens.');
+  process.exit(1);
 }
 
 function send(res, status, obj) {
@@ -96,14 +69,6 @@ function readBody(req) {
     });
     req.on('error', reject);
   });
-}
-
-function authOk(req) {
-  if (!APP_SECRET) return true; // dev only
-  const h = req.headers.authorization || '';
-  if (h === 'Bearer ' + APP_SECRET) return true;
-  if (req.headers['x-zaiken-secret'] === APP_SECRET) return true;
-  return false;
 }
 
 function httpJson(urlStr, { method = 'GET', headers = {}, body = null, timeoutMs = 60000 } = {}) {
@@ -321,6 +286,51 @@ async function handleDaily(body) {
   };
 }
 
+// ---- Rate Limiting Setup ----
+const rateLimits = new Map();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, data] of rateLimits.entries()) {
+    if (now - data.lastUpdated > 24 * 60 * 60 * 1000) {
+      rateLimits.delete(key);
+    }
+  }
+}, 10 * 60 * 1000);
+
+function checkRateLimit(req) {
+  const ip = req.socket.remoteAddress || '127.0.0.1';
+  const identifier = req.user ? req.user.sub : ip;
+
+  const now = Date.now();
+  if (!rateLimits.has(identifier)) {
+    rateLimits.set(identifier, { minCount: 0, minReset: now + 60000, dayCount: 0, dayReset: now + 86400000, lastUpdated: now });
+  }
+
+  const record = rateLimits.get(identifier);
+  record.lastUpdated = now;
+
+  if (now > record.minReset) {
+    record.minCount = 0;
+    record.minReset = now + 60000;
+  }
+
+  if (now > record.dayReset) {
+    record.dayCount = 0;
+    record.dayReset = now + 86400000;
+  }
+
+  record.minCount++;
+  record.dayCount++;
+
+  if (record.minCount > LIMIT_MIN || record.dayCount > LIMIT_DAY) {
+    return { ok: false, error: 'Rate limit exceeded. Please try again later.' };
+  }
+
+  return { ok: true };
+}
+
+// ---- HTTP Server ----
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204, {});
 
@@ -337,10 +347,25 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  if (!authOk(req)) return send(res, 401, { ok: false, error: 'Unauthorized' });
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
-  const gate = allow(rateKey(req));
-  if (!gate.ok && u.pathname !== '/health') return send(res, 429, gate);
+  if (!token) {
+    return send(res, 401, { error: 'Unauthorized: Missing token' });
+  }
+
+  try {
+    const user = jwt.verify(token, ZAIKEN_JWT_SECRET, { algorithms: ['HS256'] });
+    req.user = user; 
+  } catch (err) {
+    return send(res, 403, { error: 'Forbidden: Invalid or expired token' });
+  }
+
+  // فحص معدل الاستخدام وتجنب انهيار المتغيرات
+  const gate = checkRateLimit(req);
+  if (!gate.ok && u.pathname !== '/health') {
+    return send(res, 429, gate);
+  }
 
   try {
     if (req.method === 'POST' && u.pathname === '/v1/coach') {

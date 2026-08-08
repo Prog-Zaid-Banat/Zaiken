@@ -13,7 +13,6 @@ function uuidv4() {
 const authService = require('./src/main/services/auth');
 const gamescanner = require('./src/main/services/gamescanner');
 const systemstats = require('./src/main/services/systemstats');
-const db = require('./src/main/database');
 const { initCrashReporting, reportError } = require('./src/main/services/crash');
 const { setupAutoUpdater } = require('./src/main/services/updater');
 const aicoach = require('./src/main/services/aicoach');
@@ -34,7 +33,6 @@ const logWatchers = new Map();
 let overlayStatsTimer = null;
 let activePlaySession = null; // { gameId, startedAt, exeName }
 
-
 // Single-instance lock
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -49,7 +47,6 @@ if (!gotLock) {
   });
 }
 
-db.init(DB_PATH);
 fs.mkdirSync(COVERS_DIR, { recursive: true });
 
 app.whenReady().then(async () => {
@@ -65,10 +62,6 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
 });
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
-  });
-
 
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err);
@@ -94,6 +87,16 @@ app.on('will-quit', () => {
     try { watcher.close(); } catch {}
   }
   logWatchers.clear();
+  db.close();
+});
+
+// Renderer content is local-only. Never allow a compromised renderer to turn
+// navigation or popup creation into a remote privileged Electron window.
+app.on('web-contents-created', (_event, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file://')) event.preventDefault();
+  });
 });
 
 function createMainWindow() {
@@ -228,7 +231,6 @@ function _stopOverlayStatsFeed() {
   }
 }
 
-
 function createTray() {
   const empty = nativeImage.createEmpty();
   try {
@@ -315,7 +317,7 @@ ipcMain.on('window-close', () => {
 ipcMain.on('window-quit', () => app.quit());
 ipcMain.on('toggle-overlay', _toggleOverlay);
 ipcMain.on('open-external', (_, url) => {
-  if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
+  if (typeof url === 'string' && /^https:\/\//i.test(url)) shell.openExternal(url);
 });
 ipcMain.on('open-folder', (_, p) => {
   if (p && fs.existsSync(p)) shell.openPath(p);
@@ -420,6 +422,8 @@ ipcMain.handle('read-log-tail', async (_, logPath, lines = 100) => {
     return { ok: false, error: e.message };
   }
 });
+// استدعاء الخدمات التي أنشأناها (تأكد من تعديل المسار قليلاً بحسب مكان ملف main.js بالنسبة لمجلد src)
+// أو يمكنك كتابة المنطق مباشرة هنا لتجنب أي مشاكل في مسارات الـ TypeScript/JavaScript:
 
 ipcMain.handle('start-log-watch', (_, logPath, gameId) => {
   if (!logPath || !fs.existsSync(logPath)) return { ok: false, error: 'File not found' };
@@ -512,7 +516,6 @@ ipcMain.handle('ai-daily-reports-batch', async (_, games) => {
 
 ipcMain.handle('db-get-log-hashes', (_, gameId, limit) => db.getLogHashes(gameId, limit));
 
-
 // ---- Live system stats / play sessions ----
 ipcMain.handle('system-get-stats', async () => systemstats.collectSnapshot());
 
@@ -546,14 +549,7 @@ ipcMain.handle('session-end', (_, payload = {}) => {
 
 ipcMain.handle('db-evaluate-achievements', () => db.evaluateAchievements());
 
-// ---- Auth IPC ----
-ipcMain.handle('auth-register', async (_, email, password) => {
-  try {
-    return await authService.register(email, password);
-  } catch (e) {
-    throw new Error(e.message || 'Registration failed');
-  }
-});
+
 ipcMain.handle('auth-login', async (_, email, password) => {
   try {
     return await authService.login(email, password);

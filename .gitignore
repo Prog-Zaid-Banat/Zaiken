@@ -1,5 +1,5 @@
 node_modules/
 *.exe
 *.zip
-
+.env
 ai.config.json

@@ -68,6 +68,7 @@ async function run() {
   await assert.rejects(() => auth.register('ok@test.com', '123'));
   ok('auth.register rejects short passwords');
 
+  db.close();
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${passed} checks passed.`);
 }

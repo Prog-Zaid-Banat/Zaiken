@@ -1,11 +1,3 @@
-//! Zaiken Native Daemon
-//! High-performance process for system metrics + heavy game scanning.
-//! Communicates with Electron Main via TCP localhost (or named pipe later).
-//!
-//! Protocol: newline-delimited JSON
-//!   Request:  {"id":1,"method":"get_metrics","params":{}}
-//!   Response: {"id":1,"ok":true,"result":{...}}
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -21,12 +13,12 @@ use tracing::{error, info, warn};
 const DEFAULT_PORT: u16 = 17_831;
 const METRICS_INTERVAL_MS: u64 = 1000;
 
-// ─── Protocol ───────────────────────────────────────────────
-
 #[derive(Debug, Deserialize)]
 struct Request {
     id: u64,
     method: String,
+    #[serde(default)]
+    token: Option<String>, // حقل التحقق الأمني للـ Token
     #[serde(default)]
     params: serde_json::Value,
 }
@@ -60,15 +52,14 @@ struct GameEntry {
     install_dir: Option<String>,
 }
 
-// ─── State ──────────────────────────────────────────────────
-
 struct AppState {
     sys: Mutex<System>,
     last_metrics: Mutex<Metrics>,
+    token: String, // تخزين الرمز السري للجلسة
 }
 
 impl AppState {
-    fn new() -> Self {
+    fn new(token: String) -> Self {
         let sys = System::new_with_specifics(
             RefreshKind::new()
                 .with_cpu(CpuRefreshKind::everything())
@@ -84,6 +75,7 @@ impl AppState {
                 ping_ms: None,
                 timestamp: now_ms(),
             }),
+            token,
         }
     }
 
@@ -100,7 +92,7 @@ impl AppState {
             cpu: (cpu * 10.0).round() / 10.0,
             ram_used_mb,
             ram_total_mb: ram_total_mb.max(1),
-            gpu: None, // platform-specific later
+            gpu: None,
             ping_ms: None,
             timestamp: now_ms(),
         };
@@ -116,8 +108,6 @@ fn now_ms() -> u64 {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
-
-// ─── Game scanners (Windows-focused, safe fallbacks) ────────
 
 fn scan_steam() -> Vec<GameEntry> {
     let mut out = Vec::new();
@@ -175,19 +165,16 @@ fn scan_steam() -> Vec<GameEntry> {
 fn steam_library_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
 
-    // Windows default
     if let Some(pf) = std::env::var_os("ProgramFiles(x86)") {
         roots.push(PathBuf::from(pf).join("Steam"));
     }
     if let Some(pf) = std::env::var_os("ProgramFiles") {
         roots.push(PathBuf::from(pf).join("Steam"));
     }
-    // Linux
     if let Some(home) = dirs::home_dir() {
         roots.push(home.join(".steam/steam"));
         roots.push(home.join(".local/share/Steam"));
     }
-    // macOS
     if let Some(home) = dirs::home_dir() {
         roots.push(home.join("Library/Application Support/Steam"));
     }
@@ -236,7 +223,6 @@ fn epic_manifest_dirs() -> Vec<PathBuf> {
     if let Some(pd) = std::env::var_os("ProgramData") {
         dirs.push(PathBuf::from(pd).join("Epic/EpicGamesLauncher/Data/Manifests"));
     }
-    // Linux / other fallbacks can be added later
     dirs.into_iter().filter(|p| p.exists()).collect()
 }
 
@@ -244,11 +230,8 @@ fn scan_all_games() -> Vec<GameEntry> {
     let mut games = Vec::new();
     games.extend(scan_steam());
     games.extend(scan_epic());
-    // GOG + well-known titles can be added the same way
     games
 }
-
-// ─── Request handling ───────────────────────────────────────
 
 async fn handle_request(state: &AppState, req: Request) -> Response {
     match req.method.as_str() {
@@ -277,7 +260,6 @@ async fn handle_request(state: &AppState, req: Request) -> Response {
             }
         }
         "scan_games" => {
-            // Heavy work – runs on blocking pool
             let games = tokio::task::spawn_blocking(scan_all_games)
                 .await
                 .unwrap_or_default();
@@ -324,6 +306,21 @@ async fn handle_client(state: Arc<AppState>, stream: TcpStream) {
             }
         };
 
+        // --- جدار الحماية: التحقق من الـ Token السري ---
+        if req.token.as_deref() != Some(&state.token) {
+            warn!("Unauthorized request attempt detected!");
+            let err = Response {
+                id: req.id,
+                ok: false,
+                result: None,
+                error: Some("Unauthorized: Invalid or missing token".into()),
+            };
+            let _ = writer
+                .write_all(format!("{}\n", serde_json::to_string(&err).unwrap_or_default()).as_bytes())
+                .await;
+            break; // قطع الاتصال فوراً لحماية النظام
+        }
+
         let resp = handle_request(&state, req).await;
         let payload = serde_json::to_string(&resp).unwrap_or_default() + "\n";
         if writer.write_all(payload.as_bytes()).await.is_err() {
@@ -331,8 +328,6 @@ async fn handle_client(state: Arc<AppState>, stream: TcpStream) {
         }
     }
 }
-
-// ─── Background metrics loop ────────────────────────────────
 
 async fn metrics_loop(state: Arc<AppState>) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(METRICS_INTERVAL_MS));
@@ -342,8 +337,6 @@ async fn metrics_loop(state: Arc<AppState>) {
     }
 }
 
-// ─── Main ───────────────────────────────────────────────────
-
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -352,6 +345,16 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| "zaiken_daemon=info".into()),
         )
         .init();
+
+    // قراءة الرمز السري من متغيرات البيئة القادمة من Electron
+    let daemon_token = std::env::var("ZAIKEN_DAEMON_TOKEN").unwrap_or_else(|_| {
+        error!("ZAIKEN_DAEMON_TOKEN environment variable is missing!");
+        String::new()
+    });
+
+    if daemon_token.is_empty() {
+        error!("Fatal: Running without a secure token is disabled.");
+    }
 
     let port: u16 = std::env::var("ZAIKEN_DAEMON_PORT")
         .ok()
@@ -363,11 +366,10 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("failed to bind {addr}"))?;
 
-    info!("Zaiken daemon listening on {addr}");
+    info!("Zaiken daemon listening securely on {addr}");
 
-    let state = Arc::new(AppState::new());
+    let state = Arc::new(AppState::new(daemon_token));
 
-    // Background sampler
     tokio::spawn(metrics_loop(state.clone()));
 
     loop {

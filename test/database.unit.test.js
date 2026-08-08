@@ -24,6 +24,7 @@ async function run() {
   const gamesPath = path.join(tmp, 'games.json');
   fs.writeFileSync(gamesPath, JSON.stringify({ __v: 1, __sig: 'deadbeef', data: [{ id: 'x', name: 'Hacked' }] }));
   // clear cache by re-init
+  db.close();
   delete require.cache[require.resolve('../src/main/database')];
   const db2 = require('../src/main/database');
   db2.init(tmp);
@@ -58,6 +59,7 @@ async function run() {
   assert.strictEqual(typeof db2.addWallet, 'undefined');
   ok('tournament and store APIs are absent');
 
+  db2.close();
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${passed} database unit checks passed.`);
 }
