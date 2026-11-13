@@ -15,7 +15,14 @@ class SecretStore {
     keytar = null;
     backend = 'memory-dev';
     memory = new Map();
-    async init() {
+    initPromise = null;
+    /** Initializes the OS credential backend exactly once (idempotent). */
+    init() {
+        if (!this.initPromise)
+            this.initPromise = this.doInit();
+        return this.initPromise;
+    }
+    async doInit() {
         try {
             // dynamic import so pure-node tests can still load module graph
             this.keytar = require('keytar');

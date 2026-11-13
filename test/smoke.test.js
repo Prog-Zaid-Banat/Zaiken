@@ -1,5 +1,5 @@
 // Copyright © 2026 [Zaid Bilal Banat]. All rights reserved. Zaiken
-// Minimal smoke tests for the local (non-Electron) modules.
+// Minimal smoke tests for the modern (TypeScript) runtime stack.
 // Run with: npm test
 'use strict';
 
@@ -8,72 +8,87 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const db = require('../src/main/database');
-const auth = require('../src/main/services/auth');
+const { initDatabase, closeDatabase } = require('../dist/infrastructure/database/client');
+const { DatabaseConnection } = require('../dist/infrastructure/database/DatabaseConnection');
+const { MigrationRunner } = require('../dist/infrastructure/database/MigrationRunner');
+const { setDatabase } = require('../dist/main/ipc/databaseProvider');
+const { setGameRepository } = require('../dist/main/ipc/repositoryProvider');
+const { SqliteGameRepository } = require('../dist/infrastructure/database/repositories/SqliteGameRepository');
+const { SqliteSessionRepository } = require('../dist/infrastructure/database/repositories/SqliteSessionRepository');
+const authService = require('../dist/main/services/auth.js').default;
 
 let passed = 0;
 function ok(label) { passed++; console.log(`  ✓ ${label}`); }
 
 async function run() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'zaiken-smoke-'));
-  db.init(tmp);
+  const dbPath = path.join(tmp, 'zaiken.db');
 
-  // --- database basics ---
-  const game = db.addGame({ name: 'Test Game', genre: 'FPS' });
-  assert.ok(game.id, 'game should get an id');
-  ok('db.addGame creates a game with an id');
+  initDatabase(dbPath);
+  const conn = new DatabaseConnection();
+  conn.initialize(dbPath);
+  new MigrationRunner(conn.getConnection()).run();
+  setDatabase(conn);
+  setGameRepository(new SqliteGameRepository());
 
-  const sess = db.addSession(game.id, 30, { kills: 5, wins: 1 });
-  assert.ok(sess.session && sess.session.minutes === 30);
-  const stats = db.getStats(game.id);
-  assert.strictEqual(stats.totalMinutes, 30);
-  ok('db.addSession + db.getStats track playtime');
-  assert.ok(Array.isArray(db.evaluateAchievements()));
-  ok('db.evaluateAchievements returns array');
-
-  const updated = db.updateGame(game.id, { name: 'Renamed' });
-  assert.strictEqual(updated.name, 'Renamed');
-  ok('db.updateGame updates fields');
-
-  assert.strictEqual(db.deleteGame(game.id), true);
-  assert.strictEqual(db.getGames().length, 0);
-  ok('db.deleteGame removes the game');
-
-  // --- local auth (no Firebase) ---
-  const user = await auth.register('smoke@test.com', 'password123');
+  // --- local auth (modern scrypt service) ---
+  const user = await authService.register('smoke@test.com', 'password123');
   assert.ok(user.uid);
   ok('auth.register creates a local user');
 
-  await assert.rejects(() => auth.register('smoke@test.com', 'password123'));
+  await assert.rejects(() => authService.register('smoke@test.com', 'password123'));
   ok('auth.register rejects duplicate emails');
 
-  await assert.rejects(() => auth.login('smoke@test.com', 'wrongpass'));
+  await assert.rejects(() => authService.login('smoke@test.com', 'wrongpass'));
   ok('auth.login rejects wrong password');
 
-  const logged = await auth.login('smoke@test.com', 'password123');
+  const logged = await authService.login('smoke@test.com', 'password123');
   assert.strictEqual(logged.uid, user.uid);
   ok('auth.login succeeds with correct password');
 
-  const current = await auth.getCurrentUser();
+  const current = await authService.getCurrentUser();
   assert.strictEqual(current.uid, user.uid);
   ok('auth.getCurrentUser returns the persisted session');
 
-  await auth.logout();
-  assert.strictEqual(await auth.getCurrentUser(), null);
+  await authService.logout();
+  assert.strictEqual(await authService.getCurrentUser(), null);
   ok('auth.logout clears the session');
 
-  await assert.rejects(() => auth.register('bad-email', '123456'));
+  await assert.rejects(() => authService.register('bad-email', '123456'));
   ok('auth.register rejects invalid emails');
 
-  await assert.rejects(() => auth.register('ok@test.com', '123'));
+  await assert.rejects(() => authService.register('ok@test.com', '123'));
   ok('auth.register rejects short passwords');
 
-  db.close();
+  // --- modern game + session persistence ---
+  const gameRepo = new SqliteGameRepository();
+  const game = await gameRepo.add({ name: 'Test Game', genre: 'FPS' });
+  assert.ok(game.id, 'game should get an id');
+  ok('game.add creates a game with an id');
+
+  const sessionRepo = new SqliteSessionRepository();
+  await sessionRepo.add({ gameId: game.id, minutes: 30, kills: 5, wins: 1, endedAt: new Date().toISOString() });
+  const stats = await gameRepo.findById(game.id);
+  assert.strictEqual(stats.totalMinutes, 30);
+  assert.strictEqual(stats.wins, 1);
+  ok('session.add + game aggregate track playtime');
+
+  const updated = await gameRepo.update(game.id, { name: 'Renamed' });
+  assert.strictEqual(updated.name, 'Renamed');
+  ok('game.update updates fields');
+
+  const deleted = await gameRepo.delete(game.id);
+  assert.strictEqual(deleted, true);
+  assert.strictEqual((await gameRepo.findAll()).length, 0);
+  ok('game.delete removes the game');
+
+  conn.close();
+  closeDatabase();
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\n${passed} checks passed.`);
 }
 
-run().catch(e => {
+run().catch((e) => {
   console.error('\n✗ SMOKE TESTS FAILED:', e.message);
   process.exit(1);
 });

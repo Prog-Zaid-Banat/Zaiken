@@ -1,5 +1,12 @@
 import { ipcMain } from "electron";
 import { getGameRepository } from "./repositoryProvider";
+import { SqliteSessionRepository } from "../../infrastructure/database/repositories/SqliteSessionRepository";
+import { isTrustedSender } from "../windowRegistry";
+import { gameCreateSchema, gameUpdateSchema, parseGameId } from "./validationSchemas";
+
+
+const sessionRepository =
+    new SqliteSessionRepository();
 
 
 export function registerGameIpcHandlers() {
@@ -7,7 +14,11 @@ export function registerGameIpcHandlers() {
 
     ipcMain.handle(
         "zaiken:games:get-all",
-        async () => {
+        async (event) => {
+
+            if (!isTrustedSender(event)) {
+                return { success: false, error: "Unauthorized sender" };
+            }
 
             try {
 
@@ -49,29 +60,26 @@ export function registerGameIpcHandlers() {
 
     ipcMain.handle(
         "zaiken:games:save",
-        async (_, gameData) => {
+        async (event, gameData) => {
+
+            if (!isTrustedSender(event)) {
+                return { success: false, error: "Unauthorized sender" };
+            }
 
             try {
+
+                const parsed = gameCreateSchema.safeParse(gameData);
+                if (!parsed.success) {
+                    return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid game data" };
+                }
 
                 const gameRepository =
                     getGameRepository();
 
 
-                if (
-                    !gameData ||
-                    !gameData.name
-                ) {
-
-                    throw new Error(
-                        "Game name is required"
-                    );
-
-                }
-
-
                 const saved =
                     await gameRepository.add(
-                        gameData
+                        parsed.data
                     );
 
 
@@ -103,27 +111,31 @@ export function registerGameIpcHandlers() {
 
     ipcMain.handle(
         "zaiken:games:update",
-        async (_, id, patch) => {
+        async (event, id, patch) => {
+
+            if (!isTrustedSender(event)) {
+                return { success: false, error: "Unauthorized sender" };
+            }
 
             try {
+
+                const parsedId = parseGameId(id);
+                const parsedPatch = gameUpdateSchema.safeParse(patch);
+                if (!parsedId.success) {
+                    return { success: false, error: parsedId.error.issues[0]?.message ?? "Invalid game ID" };
+                }
+                if (!parsedPatch.success) {
+                    return { success: false, error: parsedPatch.error.issues[0]?.message ?? "Invalid game update" };
+                }
 
                 const gameRepository =
                     getGameRepository();
 
 
-                if (!id) {
-
-                    throw new Error(
-                        "Game ID is required"
-                    );
-
-                }
-
-
                 const updated =
                     await gameRepository.update(
-                        id,
-                        patch
+                        parsedId.data,
+                        parsedPatch.data
                     );
 
 
@@ -165,25 +177,25 @@ export function registerGameIpcHandlers() {
 
     ipcMain.handle(
         "zaiken:games:delete",
-        async (_, gameId) => {
+        async (event, gameId) => {
+
+            if (!isTrustedSender(event)) {
+                return { success: false, error: "Unauthorized sender" };
+            }
 
             try {
+
+                const parsedId = parseGameId(gameId);
+                if (!parsedId.success) {
+                    return { success: false, error: parsedId.error.issues[0]?.message ?? "Invalid game ID" };
+                }
 
                 const gameRepository =
                     getGameRepository();
 
 
-                if (!gameId) {
-
-                    throw new Error(
-                        "Game ID is required"
-                    );
-
-                }
-
-
                 await gameRepository.delete(
-                    gameId
+                    parsedId.data
                 );
 
 
@@ -203,6 +215,63 @@ export function registerGameIpcHandlers() {
                 return {
                     success: false,
                     error: error.message
+                };
+
+            }
+
+        }
+    );
+
+
+    ipcMain.handle(
+        "db-add-session",
+        async (event, gameId, minutes, stats) => {
+
+            if (!isTrustedSender(event)) {
+                return { success: false, error: "Unauthorized sender" };
+            }
+
+            if (typeof gameId !== "string" || !gameId.trim()) {
+                return { success: false, error: "gameId is required" };
+            }
+
+            const m =
+                Math.max(0, Math.round(Number(minutes) || 0));
+
+            const s =
+                stats && typeof stats === "object"
+                    ? stats
+                    : {};
+
+            try {
+
+                const startedAt =
+                    new Date(
+                        Date.now() - m * 60_000
+                    ).toISOString();
+
+                await sessionRepository.add({
+                    gameId,
+                    minutes: m,
+                    kills: Number(s.kills) || 0,
+                    deaths: Number(s.deaths) || 0,
+                    wins: Number(s.wins) || 0,
+                    losses: Number(s.losses) || 0,
+                    matches: Number(s.matches) || 0,
+                    startedAt,
+                    endedAt: new Date().toISOString()
+                });
+
+                return { success: true };
+
+
+            } catch (error: any) {
+
+                return {
+                    success: false,
+                    error:
+                        error?.message ||
+                        "Failed to add session"
                 };
 
             }

@@ -1,35 +1,144 @@
 "use strict";
+// Copyright © 2026 Zaid Bilal Banat. All rights reserved. Zaiken
+// Phase 3: authenticated token bridge to the Zaiken AI server.
+//
+// The renderer can never supply a token. The app secret is read only inside
+// this main-process module from the OS credential store (SecretStore) and a
+// short-lived HS256 JWT is minted here before every request. The Authorization
+// header is never logged, and error payloads are sanitized.
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isAllowedAiServerUrl = isAllowedAiServerUrl;
+exports.resolveAiServerUrl = resolveAiServerUrl;
 exports.callAiServerSafely = callAiServerSafely;
-async function callAiServerSafely(endpoint, payload, token) {
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const aiCredentials_1 = require("./aiCredentials");
+const DEFAULT_AI_SERVER = "http://127.0.0.1:8787";
+const TOKEN_TTL_SECONDS = "15m";
+const DEFAULT_TIMEOUT_MS = 90000;
+/**
+ * Only local AI servers are allowed over plain HTTP. Remote deployments must
+ * use HTTPS so the token is never sent in the clear.
+ */
+function isAllowedAiServerUrl(url) {
+    if (typeof url !== "string" || !url.trim())
+        return false;
+    let parsed;
     try {
-        const response = await fetch('http://localhost:8787' + endpoint, {
-            method: 'POST',
+        parsed = new URL(url.trim());
+    }
+    catch {
+        return false;
+    }
+    if (parsed.protocol === "https:")
+        return true;
+    if (parsed.protocol === "http:") {
+        const host = parsed.hostname.toLowerCase();
+        return host === "localhost" || host === "127.0.0.1" || host === "::1";
+    }
+    return false;
+}
+function resolveAiServerUrl() {
+    const configured = process.env.ZAIKEN_AI_SERVER_URL;
+    if (configured && isAllowedAiServerUrl(configured)) {
+        return configured.trim().replace(/\/$/, "");
+    }
+    return DEFAULT_AI_SERVER;
+}
+function mintToken(appSecret) {
+    return jsonwebtoken_1.default.sign({ sub: "zaiken-desktop", iat: Math.floor(Date.now() / 1000) }, appSecret, { algorithm: "HS256", expiresIn: TOKEN_TTL_SECONDS });
+}
+function scrubSecrets(text) {
+    return String(text || "")
+        .slice(0, 200)
+        .replace(/sk-[A-Za-z0-9_-]{10,}/g, "***")
+        .replace(/Bearer\s+[A-Za-z0-9._-]{10,}/gi, "Bearer ***");
+}
+/**
+ * Sends an authenticated POST to the AI server. All credentials stay in the
+ * main process; failures are mapped to safe, non-leaking messages.
+ */
+async function callAiServerSafely(endpoint, payload, opts = {}) {
+    if (typeof endpoint !== "string" || !endpoint.startsWith("/")) {
+        return { ok: false, error: "Invalid AI server endpoint." };
+    }
+    const appSecret = await aiCredentials_1.aiCredentials.getAppSecret();
+    if (!appSecret) {
+        return {
+            ok: false,
+            needsSetup: true,
+            error: "AI Coach is not configured. Add an API key in Settings → AI Coach, and make sure the Zaiken AI server is running.",
+        };
+    }
+    const baseUrl = resolveAiServerUrl();
+    const target = baseUrl + endpoint;
+    if (!isAllowedAiServerUrl(target)) {
+        return { ok: false, error: "AI server URL is not allowed." };
+    }
+    const controller = new AbortController();
+    const timeoutMs = typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
+        ? Math.max(1000, opts.timeoutMs)
+        : DEFAULT_TIMEOUT_MS;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+        res = await fetch(target, {
+            method: "POST",
             headers: {
-                'Authorization': 'Bearer ' + token,
-                'Content-Type': 'application/json'
+                "content-type": "application/json",
+                authorization: `Bearer ${mintToken(appSecret)}`,
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal,
         });
-        const responseBody = await response.json().catch(() => null);
-        if (!response.ok) {
-            console.error('[AI Service Error] Status:', response.status, responseBody);
-            return { success: false, error: responseBody?.error || `AI server responded with status ${response.status}` };
-        }
-        return { success: true, data: responseBody };
     }
     catch (error) {
-        if (error.response) {
-            console.error('[AI Service Error] Status: ' + error.response.status, error.response.data);
-            return { success: false, error: error.response.data.error || 'AI server rejected the request' };
-        }
-        else if (error.request) {
-            console.error('[AI Service Error] No response received from AI daemon/server.');
-            return { success: false, error: 'AI server is unreachable. Please check if the daemon is running.' };
-        }
-        else {
-            console.error('[AI Service Error]', error.message);
-            return { success: false, error: error.message };
-        }
+        const aborted = error?.name === "AbortError";
+        return {
+            ok: false,
+            needsSetup: true,
+            error: aborted
+                ? "AI server timed out. Try again later."
+                : "AI server is not running. Make sure the Zaiken AI server is running on port 8787.",
+        };
     }
+    finally {
+        clearTimeout(timer);
+    }
+    // Status-only logging. Never log the Authorization header or the payload.
+    const status = res.status;
+    if (status >= 400) {
+        if (status === 401 || status === 403) {
+            return {
+                ok: false,
+                authFailed: true,
+                needsSetup: true,
+                error: "The AI server rejected the app credentials. Check the configured app secret.",
+            };
+        }
+        if (status === 429) {
+            return { ok: false, error: "AI server rate limit exceeded. Try again later." };
+        }
+        const raw = await res.text().catch(() => "");
+        const detail = scrubSecrets(raw);
+        return {
+            ok: false,
+            error: detail
+                ? `AI server error (${status}): ${detail}`
+                : `AI server error (${status}).`,
+        };
+    }
+    let body;
+    try {
+        body = await res.json();
+    }
+    catch {
+        return { ok: false, error: "AI server returned a malformed response." };
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return { ok: false, error: "AI server returned a malformed response." };
+    }
+    return { ok: true, data: body };
 }

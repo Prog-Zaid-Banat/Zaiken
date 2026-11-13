@@ -1,7 +1,10 @@
 import { app, BrowserWindow } from "electron";
 import path from "path";
-import { bootstrap } from "./bootstrap";
+import { bootstrap, shutdownRuntime } from "./bootstrap";
+import { setMainWindow } from "./windowRegistry";
 
+const IS_SMOKE_TEST = process.argv.includes("--smoke-test");
+const IS_DEV = process.argv.includes("--dev");
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -28,10 +31,12 @@ function createWindow(): void {
 
             nodeIntegration: false,
 
-            sandbox: false
+            sandbox: true
         }
 
     });
+
+    setMainWindow(mainWindow);
 
 
 
@@ -42,14 +47,37 @@ function createWindow(): void {
         )
     );
 
-    mainWindow.webContents.openDevTools();
+
+    // Phase 3: DevTools only in development mode — never in production.
+    if (IS_DEV) {
+
+        mainWindow.webContents.openDevTools({ mode: "detach" });
+
+    }
 
 
+    // Phase 3: smoke-test instrumentation for scripts/electron-smoke.js
+    if (IS_SMOKE_TEST) {
 
-    // فتح DevTools فقط في وضع التطوير
-    if (process.argv.includes("--dev")) {
+        mainWindow.webContents.once("did-fail-load", (_event, code, desc) => {
 
-        mainWindow.webContents.openDevTools();
+            console.error(
+                "[Zaiken] SMOKE renderer load failed:",
+                code,
+                desc
+            );
+
+            app.exit(1);
+
+        });
+
+        mainWindow.webContents.once("did-finish-load", () => {
+
+            console.log(
+                "[Zaiken] SMOKE renderer loaded"
+            );
+
+        });
 
     }
 
@@ -60,6 +88,7 @@ function createWindow(): void {
         () => {
 
             mainWindow = null;
+            setMainWindow(null);
 
         }
     );
@@ -77,18 +106,33 @@ async function start(): Promise<void> {
         await app.whenReady();
 
 
-
         await bootstrap();
-
 
 
         createWindow();
 
 
-
         console.log(
             "[Zaiken] Application started successfully"
         );
+
+
+        if (IS_SMOKE_TEST) {
+
+            setTimeout(
+                () => {
+
+                    console.log(
+                        "[Zaiken] SMOKE window open; quitting"
+                    );
+
+                    app.quit();
+
+                },
+                6000
+            );
+
+        }
 
 
     } catch (error) {
@@ -100,7 +144,15 @@ async function start(): Promise<void> {
         );
 
 
-        app.quit();
+        if (IS_SMOKE_TEST) {
+
+            app.exit(1);
+
+        } else {
+
+            app.quit();
+
+        }
 
     }
 
@@ -109,6 +161,10 @@ async function start(): Promise<void> {
 
 
 start();
+
+app.on("before-quit", () => {
+    shutdownRuntime();
+});
 
 
 
@@ -126,6 +182,7 @@ app.on(
 
     }
 );
+
 
 
 

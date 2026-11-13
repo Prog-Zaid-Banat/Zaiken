@@ -6,13 +6,15 @@ import { MigrationRunner } from "../../infrastructure/database/MigrationRunner";
 import { SqliteGameRepository } from "../../infrastructure/database/repositories/SqliteGameRepository";
 
 import { setDatabase } from "../ipc/databaseProvider";
-import { initDatabase } from "../../infrastructure/database/client";
+import { closeDatabase, initDatabase } from "../../infrastructure/database/client";
 import { setGameRepository } from "../ipc/repositoryProvider";
+import { getSecretStore } from "../../infrastructure/secrets/SecretStore";
 
 
 export class RuntimeInitializer {
 
     private readonly database: DatabaseConnection;
+    private initialized = false;
 
 
     constructor() {
@@ -23,6 +25,12 @@ export class RuntimeInitializer {
     async initialize(): Promise<void> {
 
         await this.initializeDatabase();
+        this.initialized = true;
+
+
+        // Phase 3: initialize the OS-backed credential store (keytar) so AI
+        // credentials are read/written through the OS vault, never settings.
+        await getSecretStore().init();
 
 
         console.log(
@@ -101,7 +109,11 @@ export class RuntimeInitializer {
 
     shutdown(): void {
 
+        if (!this.initialized) return;
+
         this.database.close();
+        closeDatabase();
+        this.initialized = false;
 
 
         console.log(

@@ -1,70 +1,114 @@
 // Copyright © 2026 [Zaid Bilal Banat]. All rights reserved. Zaiken
+// Modern (TypeScript) database stack unit checks.
+// Run with: npm test
 'use strict';
 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const db = require('../src/main/database');
+
+const { initDatabase, getSqlite, closeDatabase } = require('../dist/infrastructure/database/client');
+const { DatabaseConnection } = require('../dist/infrastructure/database/DatabaseConnection');
+const { MigrationRunner } = require('../dist/infrastructure/database/MigrationRunner');
+const { setDatabase } = require('../dist/main/ipc/databaseProvider');
+const { setGameRepository, getGameRepository } = require('../dist/main/ipc/repositoryProvider');
+const { SqliteGameRepository } = require('../dist/infrastructure/database/repositories/SqliteGameRepository');
+const { SqliteSessionRepository } = require('../dist/infrastructure/database/repositories/SqliteSessionRepository');
+const { SqliteSettingsRepository } = require('../dist/infrastructure/database/repositories/SqliteSettingsRepository');
+const { SqliteAchievementsRepository } = require('../dist/infrastructure/database/repositories/SqliteAchievementsRepository');
+const { SqliteProfileRepository } = require('../dist/infrastructure/database/repositories/SqliteProfileRepository');
+const { SqliteUserRepository } = require('../dist/infrastructure/database/repositories/SqliteUserRepository');
 
 let passed = 0;
 function ok(label) { passed++; console.log(`  ✓ ${label}`); }
 
 async function run() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'zaiken-db-unit-'));
-  db.init(tmp);
+  const dbPath = path.join(tmp, 'zaiken.db');
 
-  // profile defaults
-  const profile = db.getProfile();
-  assert.ok(profile.username);
-  assert.strictEqual(typeof profile.level, 'number');
-  ok('getProfile returns defaults');
+  initDatabase(dbPath);
+  const conn = new DatabaseConnection();
+  conn.initialize(dbPath);
+  new MigrationRunner(conn.getConnection()).run();
+  setDatabase(conn);
+  setGameRepository(new SqliteGameRepository());
 
-  // integrity: tamper a store file and ensure fallback
-  const gamesPath = path.join(tmp, 'games.json');
-  fs.writeFileSync(gamesPath, JSON.stringify({ __v: 1, __sig: 'deadbeef', data: [{ id: 'x', name: 'Hacked' }] }));
-  // clear cache by re-init
-  db.close();
-  delete require.cache[require.resolve('../src/main/database')];
-  const db2 = require('../src/main/database');
-  db2.init(tmp);
-  const games = db2.getGames();
-  // after integrity failure should reset to default empty array
-  assert.ok(Array.isArray(games));
-  ok('tampered games store falls back safely');
+  // migrations applied (schema_meta version = 2, 0001 + 0002)
+  const version = getSqlite().prepare("SELECT value FROM schema_meta WHERE key = 'version'").get().value;
+  assert.strictEqual(version, '2');
+  ok('migrations applied (schema_meta version 2)');
 
-  // match + achievements
-  db2.recordMatchResult({ wins: 1, kills: 3, deaths: 1, matches: 1 });
-  const p2 = db2.getProfile();
-  assert.ok(p2.totalWins >= 1);
-  assert.ok(p2.xp >= 0);
-  ok('recordMatchResult updates profile XP/wins');
+  // settings save/get (arbitrary keys)
+  const settingsRepo = new SqliteSettingsRepository();
+  const saved = settingsRepo.save({ overlayEnabled: true, accentColor: '#00FFB2', aiApiKey: 'k' });
+  assert.strictEqual(saved.overlayEnabled, true);
+  assert.strictEqual(saved.aiApiKey, 'k');
+  ok('saveSettings persists arbitrary keys');
 
-  const unlocked = db2.evaluateAchievements();
-  assert.ok(Array.isArray(unlocked));
-  const fb = db2.getAchievements().find(a => a.id === 'first_blood');
-  assert.ok(fb);
-  assert.strictEqual(fb.desc.includes('tournament'), false);
-  ok('first_blood is not tournament-based');
+  const loaded = settingsRepo.getAll();
+  assert.strictEqual(loaded.accentColor, '#00FFB2');
+  assert.strictEqual(loaded.aiApiKey, 'k');
+  ok('getSettings returns merged defaults + saved keys');
 
-  // settings merge
-  db2.saveSettings({ overlayEnabled: true, accentColor: '#00FFB2' });
-  const s = db2.getSettings();
-  assert.strictEqual(s.overlayEnabled, true);
-  ok('saveSettings merges keys');
+  // game CRUD
+  const gameRepo = getGameRepository();
+  const game = await gameRepo.add({ name: 'Test Game', genre: 'FPS' });
+  assert.ok(game.id);
+  ok('game add returns id');
 
-  // no tournament / store APIs
-  assert.strictEqual(typeof db2.getTournaments, 'undefined');
-  assert.strictEqual(typeof db2.getStoreItems, 'undefined');
-  assert.strictEqual(typeof db2.addWallet, 'undefined');
-  ok('tournament and store APIs are absent');
+  // session + game aggregates + profile creation
+  const sessionRepo = new SqliteSessionRepository();
+  await sessionRepo.add({ gameId: game.id, minutes: 30, kills: 5, wins: 1, endedAt: new Date().toISOString() });
+  const gameAfter = await gameRepo.findById(game.id);
+  assert.strictEqual(gameAfter.totalMinutes, 30);
+  assert.strictEqual(gameAfter.wins, 1);
+  assert.strictEqual(gameAfter.kills, 5);
+  ok('session updates game aggregates');
 
-  db2.close();
+  const sessions = await sessionRepo.findByGame(game.id);
+  assert.strictEqual(sessions.length, 1);
+  ok('findByGame returns recorded sessions');
+
+  const daily = await sessionRepo.dailyStats(7);
+  assert.strictEqual(daily.length, 7);
+  ok('dailyStats returns 7 days');
+
+  const profileRepo = new SqliteProfileRepository();
+  const prof = await profileRepo.findCurrent();
+  assert.ok(prof.id);
+  assert.strictEqual(prof.level, 1);
+  ok('profile is created with defaults');
+
+  // achievements: seeded + evaluate unlocks first_blood after wins
+  const achRepo = new SqliteAchievementsRepository();
+  const all = achRepo.getAll();
+  assert.ok(all.length >= 6, 'expected seeded achievements');
+  ok('seeded achievements present');
+
+  getSqlite().prepare('UPDATE profiles SET total_wins = 5').run();
+  const unlocked = achRepo.evaluate();
+  assert.ok(unlocked.some((a) => a.code === 'first_blood'));
+  ok('evaluate unlocks first_blood after wins');
+
+  // user repository + session row
+  const userRepo = new SqliteUserRepository();
+  userRepo.addUser({ id: 'u1', email: 'u@example.com', passwordHash: 'h', salt: 's' });
+  const found = userRepo.findByEmail('U@EXAMPLE.COM');
+  assert.ok(found && found.id === 'u1');
+  ok('user repository find by email is case-insensitive');
+
+  userRepo.setCurrentUserId('u1');
+  assert.strictEqual(userRepo.getCurrentUserId(), 'u1');
+  ok('auth session row tracks current user');
+
+  conn.close();
+  closeDatabase();
   fs.rmSync(tmp, { recursive: true, force: true });
-  console.log(`\n${passed} database unit checks passed.`);
+  console.log(`\n${passed} modern database unit checks passed.`);
 }
 
-run().catch(e => {
+run().catch((e) => {
   console.error('\n✗ DATABASE UNIT TESTS FAILED:', e.message);
   process.exit(1);
 });

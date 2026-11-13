@@ -3,8 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerGameIpcHandlers = registerGameIpcHandlers;
 const electron_1 = require("electron");
 const repositoryProvider_1 = require("./repositoryProvider");
+const SqliteSessionRepository_1 = require("../../infrastructure/database/repositories/SqliteSessionRepository");
+const windowRegistry_1 = require("../windowRegistry");
+const validationSchemas_1 = require("./validationSchemas");
+const sessionRepository = new SqliteSessionRepository_1.SqliteSessionRepository();
 function registerGameIpcHandlers() {
-    electron_1.ipcMain.handle("zaiken:games:get-all", async () => {
+    electron_1.ipcMain.handle("zaiken:games:get-all", async (event) => {
+        if (!(0, windowRegistry_1.isTrustedSender)(event)) {
+            return { success: false, error: "Unauthorized sender" };
+        }
         try {
             const gameRepository = (0, repositoryProvider_1.getGameRepository)();
             const games = await gameRepository.findAll();
@@ -22,14 +29,17 @@ function registerGameIpcHandlers() {
             };
         }
     });
-    electron_1.ipcMain.handle("zaiken:games:save", async (_, gameData) => {
+    electron_1.ipcMain.handle("zaiken:games:save", async (event, gameData) => {
+        if (!(0, windowRegistry_1.isTrustedSender)(event)) {
+            return { success: false, error: "Unauthorized sender" };
+        }
         try {
-            const gameRepository = (0, repositoryProvider_1.getGameRepository)();
-            if (!gameData ||
-                !gameData.name) {
-                throw new Error("Game name is required");
+            const parsed = validationSchemas_1.gameCreateSchema.safeParse(gameData);
+            if (!parsed.success) {
+                return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid game data" };
             }
-            const saved = await gameRepository.add(gameData);
+            const gameRepository = (0, repositoryProvider_1.getGameRepository)();
+            const saved = await gameRepository.add(parsed.data);
             return {
                 success: true,
                 data: saved
@@ -43,13 +53,21 @@ function registerGameIpcHandlers() {
             };
         }
     });
-    electron_1.ipcMain.handle("zaiken:games:update", async (_, id, patch) => {
+    electron_1.ipcMain.handle("zaiken:games:update", async (event, id, patch) => {
+        if (!(0, windowRegistry_1.isTrustedSender)(event)) {
+            return { success: false, error: "Unauthorized sender" };
+        }
         try {
-            const gameRepository = (0, repositoryProvider_1.getGameRepository)();
-            if (!id) {
-                throw new Error("Game ID is required");
+            const parsedId = (0, validationSchemas_1.parseGameId)(id);
+            const parsedPatch = validationSchemas_1.gameUpdateSchema.safeParse(patch);
+            if (!parsedId.success) {
+                return { success: false, error: parsedId.error.issues[0]?.message ?? "Invalid game ID" };
             }
-            const updated = await gameRepository.update(id, patch);
+            if (!parsedPatch.success) {
+                return { success: false, error: parsedPatch.error.issues[0]?.message ?? "Invalid game update" };
+            }
+            const gameRepository = (0, repositoryProvider_1.getGameRepository)();
+            const updated = await gameRepository.update(parsedId.data, parsedPatch.data);
             if (!updated) {
                 return {
                     success: false,
@@ -69,13 +87,17 @@ function registerGameIpcHandlers() {
             };
         }
     });
-    electron_1.ipcMain.handle("zaiken:games:delete", async (_, gameId) => {
+    electron_1.ipcMain.handle("zaiken:games:delete", async (event, gameId) => {
+        if (!(0, windowRegistry_1.isTrustedSender)(event)) {
+            return { success: false, error: "Unauthorized sender" };
+        }
         try {
-            const gameRepository = (0, repositoryProvider_1.getGameRepository)();
-            if (!gameId) {
-                throw new Error("Game ID is required");
+            const parsedId = (0, validationSchemas_1.parseGameId)(gameId);
+            if (!parsedId.success) {
+                return { success: false, error: parsedId.error.issues[0]?.message ?? "Invalid game ID" };
             }
-            await gameRepository.delete(gameId);
+            const gameRepository = (0, repositoryProvider_1.getGameRepository)();
+            await gameRepository.delete(parsedId.data);
             return {
                 success: true
             };
@@ -85,6 +107,40 @@ function registerGameIpcHandlers() {
             return {
                 success: false,
                 error: error.message
+            };
+        }
+    });
+    electron_1.ipcMain.handle("db-add-session", async (event, gameId, minutes, stats) => {
+        if (!(0, windowRegistry_1.isTrustedSender)(event)) {
+            return { success: false, error: "Unauthorized sender" };
+        }
+        if (typeof gameId !== "string" || !gameId.trim()) {
+            return { success: false, error: "gameId is required" };
+        }
+        const m = Math.max(0, Math.round(Number(minutes) || 0));
+        const s = stats && typeof stats === "object"
+            ? stats
+            : {};
+        try {
+            const startedAt = new Date(Date.now() - m * 60_000).toISOString();
+            await sessionRepository.add({
+                gameId,
+                minutes: m,
+                kills: Number(s.kills) || 0,
+                deaths: Number(s.deaths) || 0,
+                wins: Number(s.wins) || 0,
+                losses: Number(s.losses) || 0,
+                matches: Number(s.matches) || 0,
+                startedAt,
+                endedAt: new Date().toISOString()
+            });
+            return { success: true };
+        }
+        catch (error) {
+            return {
+                success: false,
+                error: error?.message ||
+                    "Failed to add session"
             };
         }
     });

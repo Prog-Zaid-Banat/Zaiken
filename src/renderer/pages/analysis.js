@@ -13,7 +13,8 @@ window.AnalysisPage = (function () {
   async function render(container) {
     container.innerHTML = '<div class="card"><p style="color:var(--text2)">Loading coach…</p></div>';
     var profile = await zaiken.profile.get();
-    var games = await zaiken.games.getAll();
+    var gamesResult = await zaiken.games.getAll();
+    var games = (gamesResult && gamesResult.success && Array.isArray(gamesResult.data)) ? gamesResult.data : [];
     var activeGame = (games && games.length) ? games[games.length - 1].name : 'Valorant';
     var status = { configured: false };
     try { status = await zaiken.ai.status(); } catch (e) {}

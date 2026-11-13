@@ -12,13 +12,19 @@ const SqliteGameRepository_1 = require("../../infrastructure/database/repositori
 const databaseProvider_1 = require("../ipc/databaseProvider");
 const client_1 = require("../../infrastructure/database/client");
 const repositoryProvider_1 = require("../ipc/repositoryProvider");
+const SecretStore_1 = require("../../infrastructure/secrets/SecretStore");
 class RuntimeInitializer {
     database;
+    initialized = false;
     constructor() {
         this.database = new DatabaseConnection_1.DatabaseConnection();
     }
     async initialize() {
         await this.initializeDatabase();
+        this.initialized = true;
+        // Phase 3: initialize the OS-backed credential store (keytar) so AI
+        // credentials are read/written through the OS vault, never settings.
+        await (0, SecretStore_1.getSecretStore)().init();
         console.log("[Zaiken] Runtime initialized successfully");
     }
     async initializeDatabase() {
@@ -44,7 +50,11 @@ class RuntimeInitializer {
         console.log(`[Zaiken] Database path: ${databasePath}`);
     }
     shutdown() {
+        if (!this.initialized)
+            return;
         this.database.close();
+        (0, client_1.closeDatabase)();
+        this.initialized = false;
         console.log("[Zaiken] Runtime shutdown completed");
     }
 }

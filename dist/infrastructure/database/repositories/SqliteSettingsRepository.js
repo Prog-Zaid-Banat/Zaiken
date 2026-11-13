@@ -68,5 +68,23 @@ updated_at = excluded.updated_at
             .prepare("DELETE FROM settings")
             .run();
     }
+    deleteKeys(keys) {
+        const list = (Array.isArray(keys) ? keys : [])
+            .filter((key) => typeof key === "string" &&
+            key.trim().length > 0)
+            .map((key) => key.trim());
+        if (!list.length) {
+            return;
+        }
+        const stmt = this.db()
+            .prepare("DELETE FROM settings WHERE key = ?");
+        const runAll = this.db()
+            .transaction((entries) => {
+            for (const key of entries) {
+                stmt.run(key);
+            }
+        });
+        runAll(list);
+    }
 }
 exports.SqliteSettingsRepository = SqliteSettingsRepository;

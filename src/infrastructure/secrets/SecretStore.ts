@@ -19,8 +19,15 @@ export class SecretStore {
   private keytar: typeof import('keytar') | null = null;
   private backend: 'keytar' | 'memory-dev' = 'memory-dev';
   private memory = new Map<string, string>();
+  private initPromise: Promise<void> | null = null;
 
-  async init(): Promise<void> {
+  /** Initializes the OS credential backend exactly once (idempotent). */
+  init(): Promise<void> {
+    if (!this.initPromise) this.initPromise = this.doInit();
+    return this.initPromise;
+  }
+
+  private async doInit(): Promise<void> {
     try {
       // dynamic import so pure-node tests can still load module graph
       this.keytar = require('keytar');

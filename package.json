@@ -8,22 +8,23 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "dist": "electron-builder --win",
-    "dist:dir": "electron-builder --win --dir",
-    "test": "node test/smoke.test.js && node test/database.unit.test.js",
+    "dist": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --win --dir",
+    "build": "npm run build:ts",
     "build:ts": "tsc && xcopy src\\renderer dist\\renderer /E /I /Y && xcopy src\\infrastructure\\database\\migrations dist\\infrastructure\\database\\migrations /E /I /Y",
-    "lint": "node --check main.js && node --check src/main/database.js && node --check src/main/preload.js && node --check src/main/services/crash.js && node --check src/main/services/updater.js"
+    "test": "npm run build && node test/smoke.test.js && node test/database.unit.test.js",
+    "lint": "node scripts/lint.js"
   },
   "build": {
     "appId": "com.zaiken.coach",
     "productName": "Zaiken",
     "directories": {
-      "output": "dist"
+      "output": "release"
     },
     "files": [
-      "main.js",
+      "electron-main.js",
+      "dist/**/*",
       "package.json",
-      "src/**/*",
       "assets/**/*",
       "LICENSE",
       "scripts/**/*"
@@ -72,6 +73,7 @@
   },
   "devDependencies": {
     "@electron/fuses": "1.8.0",
+    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^9.6.0",
     "@typescript-eslint/eslint-plugin": "^8.66.0",
     "@typescript-eslint/parser": "^8.66.0",
@@ -88,7 +90,7 @@
     "electron-updater": "6.3.9"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.2",
+    "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.1",

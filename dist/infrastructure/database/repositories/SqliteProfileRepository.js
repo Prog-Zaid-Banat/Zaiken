@@ -5,6 +5,7 @@ const drizzle_orm_1 = require("drizzle-orm");
 const crypto_1 = require("crypto");
 const client_1 = require("../client");
 const schema_1 = require("../schema");
+const RankCalculator_1 = require("../../../domain/services/RankCalculator");
 class SqliteProfileRepository {
     async findCurrent() {
         const row = (0, client_1.getDb)()
@@ -57,6 +58,39 @@ class SqliteProfileRepository {
                 current.bio,
             country: data.country ??
                 current.country,
+            updatedAt: new Date().toISOString()
+        })
+            .where((0, drizzle_orm_1.eq)(schema_1.profiles.id, current.id))
+            .run();
+        return this.findCurrent();
+    }
+    async recordMatch(input) {
+        const current = await this.findCurrent();
+        if (!current)
+            return null;
+        const totalWins = (current.totalWins || 0) + Math.max(0, Math.round(Number(input.wins) || 0));
+        const totalLosses = (current.totalLosses || 0) + Math.max(0, Math.round(Number(input.losses) || 0));
+        const totalKills = (current.totalKills || 0) + Math.max(0, Math.round(Number(input.kills) || 0));
+        const totalDeaths = (current.totalDeaths || 0) + Math.max(0, Math.round(Number(input.deaths) || 0));
+        const totalMatches = (current.totalMatches || 0) + Math.max(0, Math.round(Number(input.matches) || 0));
+        const winStreak = (current.winStreak || 0) + (totalWins - current.totalWins);
+        const bestWinStreak = Math.max(current.bestWinStreak || 0, winStreak);
+        const rank = (0, RankCalculator_1.computeRank)({
+            totalWins,
+            totalKills,
+            level: current.level || 1
+        });
+        (0, client_1.getDb)()
+            .update(schema_1.profiles)
+            .set({
+            totalWins,
+            totalLosses,
+            totalKills,
+            totalDeaths,
+            totalMatches,
+            winStreak,
+            bestWinStreak,
+            rank,
             updatedAt: new Date().toISOString()
         })
             .where((0, drizzle_orm_1.eq)(schema_1.profiles.id, current.id))
